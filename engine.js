@@ -34,18 +34,19 @@
   const TIER_TALENT = { bronze: 3, silver: 5, gold: 8, platinum: 11, hero: 15 };
   const TIER_ORDER = ["hero", "platinum", "gold", "silver", "bronze"];
   // Hashmark's official table; rounds 10-11 reuse round 9.
+  // Pitchmark odds (approved 2026-11-16), % per card, each card rolled independently.
   const TIER_WEIGHTS = {
-    1: { hero: 2, platinum: 80, gold: 18, silver: 0, bronze: 0 },
-    2: { hero: 2, platinum: 50, gold: 45, silver: 3, bronze: 0 },
-    3: { hero: 2, platinum: 10, gold: 65, silver: 23, bronze: 0 },
-    4: { hero: 2, platinum: 8, gold: 45, silver: 40, bronze: 5 },
-    5: { hero: 2, platinum: 8, gold: 25, silver: 60, bronze: 5 },
-    6: { hero: 2, platinum: 7, gold: 10, silver: 50, bronze: 31 },
-    7: { hero: 2, platinum: 7, gold: 10, silver: 41, bronze: 40 },
-    8: { hero: 2, platinum: 5, gold: 7, silver: 21, bronze: 65 },
-    9: { hero: 2, platinum: 4, gold: 6, silver: 18, bronze: 70 },
-    10: { hero: 2, platinum: 4, gold: 6, silver: 18, bronze: 70 },
-    11: { hero: 2, platinum: 4, gold: 6, silver: 18, bronze: 70 },
+    1: { hero: 100, platinum: 0, gold: 0, silver: 0, bronze: 0 },
+    2: { hero: 100, platinum: 0, gold: 0, silver: 0, bronze: 0 },
+    3: { hero: 0, platinum: 100, gold: 0, silver: 0, bronze: 0 },
+    4: { hero: 0, platinum: 100, gold: 0, silver: 0, bronze: 0 },
+    5: { hero: 0, platinum: 0, gold: 60, silver: 40, bronze: 0 },
+    6: { hero: 0, platinum: 0, gold: 60, silver: 40, bronze: 0 },
+    7: { hero: 0, platinum: 0, gold: 60, silver: 40, bronze: 0 },
+    8: { hero: 0, platinum: 0, gold: 0, silver: 60, bronze: 40 },
+    9: { hero: 0, platinum: 0, gold: 0, silver: 60, bronze: 40 },
+    10: { hero: 5, platinum: 10, gold: 15, silver: 30, bronze: 40 },
+    11: { hero: 5, platinum: 10, gold: 15, silver: 30, bronze: 40 },
   };
   const ROUNDS = 11;
   const CARDS_PER_ROUND = 5;
@@ -170,7 +171,7 @@
     };
   }
   function rollTier(round, rng) {
-    const w = TIER_WEIGHTS[round] || TIER_WEIGHTS[9];
+    const w = TIER_WEIGHTS[round] || TIER_WEIGHTS[ROUNDS];
     const total = TIER_ORDER.reduce((s, t) => s + (w[t] || 0), 0);
     let r = rng() * total, last = TIER_ORDER[0];
     for (const t of TIER_ORDER) {
@@ -182,14 +183,16 @@
     }
     return last;
   }
-  function fallbackTiers(wanted, round) {
+  // Rolled tier first; if it has no placeable unused player, nearest tier,
+  // preferring the adjacent lower tier, then the adjacent higher one, and so on.
+  function fallbackTiers(wanted) {
     const start = Math.max(0, TIER_ORDER.indexOf(wanted));
     const order = [TIER_ORDER[start]];
     for (let d = 1; d < TIER_ORDER.length; d++) {
-      if (start - d >= 0) order.push(TIER_ORDER[start - d]);
       if (start + d < TIER_ORDER.length) order.push(TIER_ORDER[start + d]);
+      if (start - d >= 0) order.push(TIER_ORDER[start - d]);
     }
-    return round <= 3 ? order.filter((t) => t !== "bronze") : order;
+    return order;
   }
   function pickRandom(items, rng) {
     return items.length ? items[Math.floor(rng() * items.length)] : null;
@@ -200,14 +203,21 @@
     const open = openPositions(lineup);
     const pool = players.filter((p) => !used.has(p.id) && playerSlots(p).some((f) => open.includes(f)));
     const dealt = [], ids = new Set();
+    const stats = opts.stats || null; // optional { rolled: {tier:n}, fallback: n }
     for (let i = 0; i < count; i++) {
-      const order = fallbackTiers(rollTier(round, rng), round);
+      const wanted = rollTier(round, rng);
+      const order = fallbackTiers(wanted);
       let card = null;
       for (const t of order) {
         card = pickRandom(pool.filter((p) => p.tier === t && !ids.has(p.id)), rng);
         if (card) break;
       }
       if (!card) break;
+      if (stats) {
+        stats.rolled = stats.rolled || {};
+        stats.rolled[wanted] = (stats.rolled[wanted] || 0) + 1;
+        if (card.tier !== wanted) stats.fallback = (stats.fallback || 0) + 1;
+      }
       dealt.push(card);
       ids.add(card.id);
     }
