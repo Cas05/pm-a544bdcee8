@@ -201,7 +201,11 @@
     const round = opts.round, count = opts.count || CARDS_PER_ROUND;
     const used = opts.usedIds || new Set(), lineup = opts.lineup || {}, rng = opts.rng || Math.random;
     const open = openPositions(lineup);
-    const pool = players.filter((p) => !used.has(p.id) && playerSlots(p).some((f) => open.includes(f)));
+    // excludeIds: cards just discarded by a skip; only reused if nothing else fits.
+    const exclude = opts.excludeIds || new Set();
+    const fits = players.filter((p) => !used.has(p.id) && playerSlots(p).some((f) => open.includes(f)));
+    const fresh = fits.filter((p) => !exclude.has(p.id));
+    const pool = fresh.length >= count ? fresh : fits;
     const dealt = [], ids = new Set();
     const stats = opts.stats || null; // optional { rolled: {tier:n}, fallback: n }
     for (let i = 0; i < count; i++) {

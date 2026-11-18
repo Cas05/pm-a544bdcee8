@@ -27,6 +27,7 @@
     stats: { plays: 0, bestTotal: 0, bestTalent: 0, bestChem: 0, bestOvr: 0 },
     currentId: null,
     suppressFinish: false,
+    skipsLeft: 1,
     lastResult: null,
   };
 
@@ -114,7 +115,7 @@
   }
 
   function fitNames() {
-    slotsEl.querySelectorAll(".c-name").forEach((el) => {
+    document.querySelectorAll(".slot .c-name, .deal-grid .c-name").forEach((el) => {
       el.style.fontSize = "";
       let size = parseFloat(getComputedStyle(el).fontSize);
       let guard = 0;
@@ -220,6 +221,7 @@
   }
 
   /* ---------- tray ---------- */
+  function renderTrayAndFit() { renderTray(); fitNames(); }
   function renderTray() {
     if (state.screen === "home") trayEl.innerHTML = renderHome();
     else if (state.screen === "history") trayEl.innerHTML = renderHistory();
@@ -244,20 +246,24 @@
   }
 
   function renderDeal() {
-    const hint = state.selectedDeal != null
-      ? "Tap a glowing spot to place this player."
-      : state.selectedSlot ? "Tap a glowing spot to move or swap." : "Pick a card, then a spot. Swipe for all 5.";
+    const sel = state.selectedDeal != null ? state.deal[state.selectedDeal] : null;
+    const alt = sel ? (sel.slots || []).filter((f) => f !== sel.pos) : [];
+    const hint = sel
+      ? `<strong>${esc(sel.name)}</strong> · ${esc(sel.club)}${alt.length ? " · also " + esc(alt.join("/")) : ""} · +${sel.talent} → tap a glowing spot`
+      : state.selectedSlot ? "Tap a glowing spot to move or swap." : "Pick a card, then a spot.";
+    const skipLabel = `⤼ Skip ${state.skipsLeft}`;
     const sig = state.round + ":" + state.deal.map((p) => p.id).join(",");
     const fresh = state._dealSig !== sig;
     state._dealSig = sig;
     return `<div class="deal">
       <div class="tray-head">
         <div class="tray-title"><h2>Round ${state.round} of ${E.ROUNDS}</h2><p class="hint">${hint}</p></div>
-        <div class="tray-break" title="Score = Talent + Chem points">T ${score().talent} + C ${score().chem}</div>
-        <button type="button" class="btn btn-mini" data-action="restart" id="restartBtn" aria-label="Start a new draft">↻ New</button>
+        <div class="tray-actions">
+          <button type="button" class="btn btn-mini btn-skip" data-action="skip" id="skipBtn"${state.skipsLeft > 0 ? "" : " disabled"} aria-label="Skip these 5 cards and draw 5 new ones (${state.skipsLeft} left)" title="Discard these 5 and draw 5 new cards, same round odds">${skipLabel}</button>
+          <button type="button" class="btn btn-mini" data-action="restart" id="restartBtn" aria-label="Start a new draft">↻ New</button>
+        </div>
       </div>
-      <div class="deal-row${fresh ? " fresh-deal" : ""}" id="dealRow">${state.deal.map((p, i) => `<div data-deal="${i}">${cardHtml(p, { selected: state.selectedDeal === i })}</div>`).join("")}</div>
-      <div class="pager" id="pager">${state.deal.map((_, i) => `<i data-pip="${i}" class="${i === 0 ? "on" : ""}"></i>`).join("")}</div>
+      <div class="deal-grid${fresh ? " fresh-deal" : ""}" id="dealRow">${state.deal.map((p, i) => `<div data-deal="${i}">${cardHtml(p, { compact: true, selected: state.selectedDeal === i })}</div>`).join("")}</div>
     </div>`;
   }
 
@@ -315,6 +321,7 @@
     state.selectedDeal = null;
     state.selectedSlot = null;
     state.lastResult = null;
+    state.skipsLeft = 1;
   }
 
   function goHome() {
@@ -338,9 +345,20 @@
     if (row) row.scrollLeft = 0;
   }
 
-  function dealCurrent() {
-    state.deal = E.dealRound(PLAYERS, { round: state.round, count: E.CARDS_PER_ROUND, usedIds: state.usedIds, lineup: state.lineup, rng: state.rng });
+  function dealCurrent(excludeIds) {
+    state.deal = E.dealRound(PLAYERS, { round: state.round, count: E.CARDS_PER_ROUND, usedIds: state.usedIds, lineup: state.lineup, rng: state.rng, excludeIds });
     state.selectedDeal = null;
+  }
+
+  // One skip per draft: discard the 5 offered cards and draw 5 new ones with the same round odds.
+  function skipDeal() {
+    if (state.screen !== "draft" || state.skipsLeft <= 0 || !state.deal.length) return false;
+    const discarded = new Set(state.deal.map((p) => p.id));
+    state.skipsLeft -= 1;
+    state.selectedSlot = null;
+    dealCurrent(discarded);
+    render();
+    return true;
   }
 
   function placeSelected(slotId) {
@@ -451,7 +469,7 @@
   function render() {
     document.body.dataset.screen = state.screen;
     renderField();
-    renderTray();
+    renderTrayAndFit();
     if (state.screen === "results") {
       const el = $("finalTotal");
       if (el) {
@@ -484,6 +502,7 @@
       if (!btn) return;
       const a = btn.getAttribute("data-action");
       if (a === "start" || a === "again" || a === "restart") startDraft();
+      else if (a === "skip") skipDeal();
       else if (a === "history") { state.screen = "history"; render(); }
       else if (a === "home") goHome();
     });
@@ -538,8 +557,10 @@
         history: state.history,
         stats: state.stats,
         seed: state._seed,
+        skipsLeft: state.skipsLeft,
       };
     },
+    skip: skipDeal,
     pickAndPlace(i, slotId) {
       state.selectedDeal = i;
       return placeSelected(slotId);
